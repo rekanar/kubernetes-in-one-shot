@@ -1,0 +1,322 @@
+
+=======================================================================
+     K8S ARCHITECTURE — NOTES FROM ARCHITECTURE DIAGRAM
+=======================================================================
+
+Source: K8S_Architecture.jpeg
+Symbol on diagram: K8S logo (blue ship wheel / helm icon)
+Cluster type shown: [MNC] — Multi-Node Cluster
+
+-----------------------------------------------------------------------
+OVERVIEW — WHAT THE DIAGRAM SHOWS
+-----------------------------------------------------------------------
+
+The diagram is divided into 3 main sections:
+
+  +---------------------------+   +---------------------------+
+  |    MASTER NODE            |   |    WORKER NODES           |
+  |    (H.Q — Headquarters)   |   |  Node 1 / Node 2 / Node 3 |
+  |                           |   |                           |
+  | Scheduler                 |   | Kubelet                   |
+  | etcd          API Server  |   | Pods (containers)         |
+  | Controller Mgr            |   | Service Proxy             |
+  +---------------------------+   +---------------------------+
+                    |
+       [CNI Network: Weave Net, Calico, etc.]
+                    |
+              kubectl (admin CLI tool)
+                    |
+                  User
+
+-----------------------------------------------------------------------
+SECTION 1: MASTER NODE — "H.Q (Headquarters)"
+-----------------------------------------------------------------------
+
+The Master Node is labelled "H.Q" in the diagram — it is the BRAIN
+of the entire cluster. It makes all decisions. No actual app workloads
+run here — it only controls and manages the Worker Nodes.
+
+The Master Node contains 4 key components:
+
+  1. SCHEDULER
+     -------------------------------------------------------
+     - Shown at the TOP of the Master Node box.
+     - Has arrows connecting it to the API Server.
+     - Decides WHICH Worker Node a new Pod should run on.
+     - Checks CPU, RAM, and availability of each node.
+     - It does NOT run the Pod — it only ASSIGNS it.
+
+     Think of it as: The assignment desk that says
+     "Pod A goes to Node 1, Pod B goes to Node 2."
+
+  2. etcd
+     -------------------------------------------------------
+     - Shown as a DATABASE CYLINDER icon in the Master Node.
+     - Has a GREEN BIDIRECTIONAL ARROW connecting it to the API Server.
+       → This means etcd and API Server constantly read/write to each other.
+     - Stores the ENTIRE cluster state as key-value pairs.
+     - The only persistent storage in the Control Plane.
+     - If etcd is lost → the cluster loses ALL its state!
+
+     Think of it as: The cluster's memory / logbook.
+     Everything written down here — what's running, what's desired.
+
+  3. CONTROLLER MANAGER
+     -------------------------------------------------------
+     - Shown at the BOTTOM of the Master Node box.
+     - Labelled "PM" (Process Manager) in the diagram annotation.
+     - Runs many control loops (mini-controllers) in one process:
+         * ReplicaSet Controller  → keeps N pod copies running
+         * Deployment Controller  → manages rolling updates
+         * Node Controller        → watches for node failures
+         * Job Controller         → manages one-off tasks
+     - Continuously checks: "Is the ACTUAL state = DESIRED state?"
+     - If not → takes action to correct it.
+
+     Think of it as: The watchdog that never sleeps.
+
+  4. API SERVER (Central Hub)
+     -------------------------------------------------------
+     - Shown in the CENTRE of the diagram, between Master and Workers.
+     - Annotated "TL" (Team Leader) — the central communication hub.
+     - ALL components talk THROUGH the API Server. Nothing bypasses it.
+     - It is the ONLY component that reads/writes to etcd.
+     - Exposes the Kubernetes REST API.
+     - kubectl sends all commands to the API Server.
+
+     Connections visible in the diagram:
+       etcd             <--GREEN ARROW-->  API Server (bidirectional)
+       Scheduler             ---------->  API Server
+       Controller Manager    ---------->  API Server
+       API Server            ---------->  Kubelet      (on Worker Nodes)
+       API Server            ---------->  Service Proxy (on Worker Nodes)
+       kubectl               ---------->  API Server
+
+     Think of it as: The Captain. Every order goes through the Captain.
+
+-----------------------------------------------------------------------
+SECTION 2: WORKER NODES — "The Cargo Decks"
+-----------------------------------------------------------------------
+
+The diagram shows MULTIPLE Worker Nodes stacked (Node 1, N 2, B 3),
+representing that a real cluster has many worker nodes.
+
+Each Worker Node contains:
+
+  1. KUBELET
+     -------------------------------------------------------
+     - Shown at the TOP of each Worker Node box.
+     - Receives instructions directly from the API Server (arrow shown).
+     - The node agent — runs on every Worker Node.
+     - Responsibilities:
+         * Registers the node with the cluster
+         * Watches for PodSpecs sent by API Server
+         * Tells the Container Runtime to start/stop containers
+         * Runs health checks (liveness, readiness probes)
+         * Reports node and pod status back to API Server
+     - Does NOT run inside a container — runs as a system process.
+
+     Think of it as: The deck supervisor on each cargo deck.
+
+  2. PODS (shown as orange container icons with Docker whale logos)
+     -------------------------------------------------------
+     - Shown as MULTIPLE ORANGE BOXES inside the Worker Node.
+     - Each Pod = one or more running containers.
+     - Pods are labelled "Pod" with annotation arrow in the diagram.
+     - Two pods visible in Node 1 in the diagram, showing that
+       multiple pods can run on a single worker node.
+     - Each Pod has its own IP address (internal to the cluster).
+     - Pods are TEMPORARY — if they die, new ones replace them.
+     - The Docker whale icons inside pods = actual running containers.
+
+     Think of it as: The actual shipping containers with cargo.
+
+  3. SERVICE PROXY (Kube-proxy)
+     -------------------------------------------------------
+     - Shown at the BOTTOM of each Worker Node box.
+     - Has an arrow coming FROM the User (external traffic enters here).
+     - Also receives updates from the API Server.
+     - Manages network routing rules on every node.
+     - Uses iptables / IPVS to forward traffic to the right Pod.
+     - Ensures users always reach a LIVE Pod (not a crashed one).
+     - Load balances traffic across multiple identical Pods.
+
+     Connections visible in the diagram:
+       User         -->  Service Proxy  (user traffic comes in here)
+       API Server   -->  Service Proxy  (gets routing rule updates)
+
+     Think of it as: The traffic cop that directs visitors to the right room.
+
+-----------------------------------------------------------------------
+SECTION 3: CNI NETWORK — "The Ship's Communication System"
+-----------------------------------------------------------------------
+
+  - Shown as a LARGE BIDIRECTIONAL ARROW BAR at the BOTTOM of the diagram.
+  - Spans the FULL WIDTH — connecting Master Node AND all Worker Nodes.
+  - Labelled: "CNI network: Weave Net, Calico, etc."
+
+  What is CNI?
+  -------------------------------------------------------
+  CNI = Container Network Interface.
+  It is the networking layer that allows ALL pods across ALL nodes
+  to communicate with each other, even if they're on different machines.
+
+  Without CNI:
+    Pod on Node 1 CANNOT talk to Pod on Node 2.
+  With CNI:
+    Every Pod gets a unique IP and can talk to any other Pod directly.
+
+  Common CNI plugins shown in the diagram:
+    - Weave Net  → simple, automatic IP management
+    - Calico     → high performance, supports network policies
+    - Others     → Flannel, Cilium, AWS VPC CNI, etc.
+
+  Think of it as: The ship's internal radio/communication system.
+  All crew members (pods) on all decks (nodes) can talk to each other.
+
+-----------------------------------------------------------------------
+SECTION 4: kubectl — "The Captain's Radio / Admin Tool"
+-----------------------------------------------------------------------
+
+  - Shown at the TOP RIGHT of the diagram with an arrow FROM the Master Node.
+  - kubectl is the command-line tool used by developers and admins.
+  - ALL commands go to the API Server via kubectl.
+
+  Common kubectl commands:
+    kubectl apply -f deployment.yaml   → deploy an app
+    kubectl get pods                   → list running pods
+    kubectl get nodes                  → list nodes
+    kubectl describe pod <name>        → details of a pod
+    kubectl delete pod <name>          → delete a pod
+    kubectl logs <pod-name>            → see pod logs
+    kubectl exec -it <pod> -- bash     → shell into a pod
+
+  Think of it as: The radio/intercom the captain uses to give orders
+  to the whole ship. You speak into kubectl, the ship obeys!
+
+-----------------------------------------------------------------------
+SECTION 5: USER — "The Customer"
+-----------------------------------------------------------------------
+
+  - Shown as a PERSON ICON on the far RIGHT of the diagram.
+  - Has an arrow pointing TO the Service Proxy (Kube-proxy).
+  - Represents external users accessing the application.
+
+  Flow:
+    User (browser/app) → Service Proxy → Pod → App responds → User
+
+  The User NEVER talks directly to a Pod (Pod IPs change!).
+  The User talks to a SERVICE, and kube-proxy routes to the right Pod.
+
+-----------------------------------------------------------------------
+FULL COMMUNICATION FLOW — READING THE DIAGRAM LEFT TO RIGHT
+-----------------------------------------------------------------------
+
+  DEPLOYMENT FLOW (Admin deploys an app):
+  ----------------------------------------
+  Admin uses kubectl
+      |
+      v
+  kubectl sends command to --> API Server
+      |
+      v
+  API Server writes desired state --> etcd
+      |
+      v
+  Scheduler reads from API Server --> picks best Worker Node
+      |
+      v
+  API Server notifies --> Kubelet on chosen Node
+      |
+      v
+  Kubelet tells Container Runtime --> starts Pod
+      |
+      v
+  Pod is running on Worker Node!
+      |
+      v
+  Controller Manager watches --> "Are 3 pods running? Yes. Good."
+      |
+      v
+  Service Proxy gets updated --> "New pod IP added to routing table"
+
+  USER REQUEST FLOW (User accesses the app):
+  -------------------------------------------
+  User sends HTTP request
+      |
+      v
+  Service Proxy (Kube-proxy) receives the request
+      |
+      v
+  Service Proxy checks routing rules (iptables/IPVS)
+      |
+      v
+  Forwards to the correct Pod IP
+      |
+      v
+  Pod processes request → sends response back → User sees the app!
+
+  SELF-HEALING FLOW (Pod crashes):
+  ----------------------------------
+  Pod crashes on Node 2
+      |
+      v
+  Kubelet on Node 2 detects crash → reports to API Server
+      |
+      v
+  Controller Manager sees: "Desired=3 pods, Actual=2 pods — FIX IT!"
+      |
+      v
+  Controller Manager tells API Server → create new pod
+      |
+      v
+  Scheduler picks Node 1 (has capacity)
+      |
+      v
+  Kubelet on Node 1 starts new Pod → back to 3 pods!
+      |
+      v
+  Service Proxy updates routing → removes dead pod, adds new pod IP
+
+-----------------------------------------------------------------------
+COMPONENT QUICK-REFERENCE TABLE (from the diagram)
+-----------------------------------------------------------------------
+
+  COMPONENT         | LOCATION      | SYMBOL IN DIAGRAM   | ROLE
+  ------------------|---------------|---------------------|-----------------
+  Scheduler         | Master Node   | Box + K8s gear icon | Assigns pods to nodes
+  etcd              | Master Node   | Blue cylinder DB    | Stores cluster state
+  Controller Manager| Master Node   | Box + K8s gear icon | Watchdog / reconciler
+  API Server        | Master Node   | Central box + icon  | All-comms hub (TL)
+  Kubelet           | Worker Node   | Box + K8s gear icon | Runs pods on node
+  Pod               | Worker Node   | Orange boxes        | Running containers
+  Service Proxy     | Worker Node   | Box + K8s gear icon | Routes traffic to pods
+  CNI Network       | Cluster-wide  | Blue arrow bar      | Pod-to-pod networking
+  kubectl           | Admin tool    | Text label          | CLI to send commands
+  User              | External      | Person icon         | Sends traffic to app
+
+-----------------------------------------------------------------------
+KEY ANNOTATIONS VISIBLE IN THE DIAGRAM
+-----------------------------------------------------------------------
+
+  Annotation | Meaning
+  -----------|----------------------------------------------------------
+  H.Q        | Headquarters — the Master Node is the brain/HQ
+  [MNC]      | Multi-Node Cluster — shows this is a multi-node setup
+  K8S        | Kubernetes — the logo and abbreviation
+  TL         | Team Leader — the API Server leads all communication
+  PM         | Process Manager — the Controller Manager manages processes
+  UR         | User Request — label near the Master Node input area
+  Node Master| The Master Node (Control Plane node)
+  Node 1     | First Worker Node
+  N 2        | Second Worker Node (Node 2)
+  B 3        | Third Worker Node (Node 3 / Batch?)
+  Worker Node| Label for the entire right section (Worker Nodes)
+  Pod        | Annotation pointing to orange container icons
+  Pure       | Indicates pure/dedicated Worker Nodes (no control plane)
+
+=======================================================================
+  FILES: K8S_Architecture.jpeg (source diagram)
+         note1.txt (Docker & K8s Basics)
+         note2.txt (Architecture + Kubelet & Kube-Proxy)
+=======================================================================
